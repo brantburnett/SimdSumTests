@@ -55,9 +55,6 @@ namespace SimdLib
             return sum;
         }
 
-        // Note: The overflow checking in this algorithm is only correct for signed integers.
-        // If support is ever added for unsigned integers then the overflow check should be
-        // overflowTracking |= (accumulator & data) | Vector.AndNot(accumulator | data, sum);
         private static T SumSignedIntegersVectorized<T>(ReadOnlySpan<T> span)
             where T : struct, IBinaryInteger<T>
         {
@@ -76,6 +73,10 @@ namespace SimdLib
             // By bitwise or-ing the overflowTracking vector for each step we can save cycles by testing
             // the sign bits less often. If any iteration has the sign bit set in any element it indicates
             // there was an overflow.
+            //
+            // Note: The overflow checking in this algorithm is only correct for signed integers.
+            // If support is ever added for unsigned integers then the overflow check should be
+            // overflowTracking |= (accumulator & data) | Vector.AndNot(accumulator | data, sum);
 
             Vector<T> accumulator = Vector<T>.Zero;
 
@@ -122,6 +123,9 @@ namespace SimdLib
                     Vector<T> accumulator2 = accumulator + data;
                     overflowTracking |= (accumulator2 ^ accumulator) & (accumulator2 ^ data);
                     accumulator = accumulator2;
+
+                    ptr = ref Unsafe.Add(ref ptr, Vector<T>.Count);
+                    length -= Vector<T>.Count;
                 } while (length >= Vector<T>.Count);
 
                 if ((overflowTracking & overflowTestVector) != Vector<T>.Zero)
