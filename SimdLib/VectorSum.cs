@@ -2,6 +2,8 @@
 using System.Numerics;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
+using System.Runtime.Intrinsics;
+using System.Runtime.Intrinsics.Arm;
 
 namespace SimdLib
 {
@@ -27,7 +29,7 @@ namespace SimdLib
             if (typeof(T) == typeof(TResult)
                 && Vector<T>.IsSupported
                 && Vector.IsHardwareAccelerated
-                && span.Length >= Math.Max(32, Vector<T>.Count * 4))
+                && span.Length >= Vector<T>.Count * 4)
             {
                 // Note: While only two vectors of data are a requirement, the advantages are significantly
                 // reduced for short lists of larger integers. This is because fewer operations would be required
@@ -66,32 +68,28 @@ namespace SimdLib
 
             Vector<T> accumulator = Vector<T>.Zero;
 
-
             // Build a test vector with only the MSB set.
             Vector<T> overflowTestVector = new(T.RotateRight(T.MultiplicativeIdentity, 1));
 
             // Unroll the loop to sum 4 vectors per iteration
             do
             {
+                // Switch accumulators with each step to avoid an additional move operation
                 Vector<T> data = Vector.LoadUnsafe(ref ptr);
-                Vector<T> sum = accumulator + data;
-                Vector<T> overflowTracking = (sum ^ accumulator) & (sum ^ data);
-                accumulator = sum;
+                Vector<T> accumulator2 = accumulator + data;
+                Vector<T> overflowTracking = (accumulator2 ^ accumulator) & (accumulator2 ^ data);
 
-                data = Vector.LoadUnsafe(ref ptr, (nuint)Vector<T>.Count * 1);
-                sum = accumulator + data;
-                overflowTracking |= (sum ^ accumulator) & (sum ^ data);
-                accumulator = sum;
+                data = Vector.LoadUnsafe(ref ptr, (nuint)Vector<T>.Count);
+                accumulator = accumulator2 + data;
+                overflowTracking |= (accumulator ^ accumulator2) & (accumulator ^ data);
 
                 data = Vector.LoadUnsafe(ref ptr, (nuint)Vector<T>.Count * 2);
-                sum = accumulator + data;
-                overflowTracking |= (sum ^ accumulator) & (sum ^ data);
-                accumulator = sum;
+                accumulator2 = accumulator + data;
+                overflowTracking |= (accumulator2 ^ accumulator) & (accumulator2 ^ data);
 
                 data = Vector.LoadUnsafe(ref ptr, (nuint)Vector<T>.Count * 3);
-                sum = accumulator + data;
-                overflowTracking |= (sum ^ accumulator) & (sum ^ data);
-                accumulator = sum;
+                accumulator = accumulator2 + data;
+                overflowTracking |= (accumulator ^ accumulator2) & (accumulator ^ data);
 
                 // Test the elements in overflowTracking to see if the MSB is set in any element.
                 // If any iteration sets the MSB in any element of overflowTracking then we've overflowed.
@@ -104,6 +102,28 @@ namespace SimdLib
                 length -= Vector<T>.Count * 4;
             } while (length >= Vector<T>.Count * 4);
 
+            // Process remaining vectors, if any, without unrolling
+            if (length >= Vector<T>.Count)
+            {
+                Vector<T> overflowTracking = Vector<T>.Zero;
+
+                do
+                {
+                    Vector<T> data = Vector.LoadUnsafe(ref ptr);
+                    Vector<T> accumulator2 = accumulator + data;
+                    overflowTracking |= (accumulator2 ^ accumulator) & (accumulator2 ^ data);
+                    accumulator = accumulator2;
+                } while (length >= Vector<T>.Count);
+
+                // Test the elements in overflowTracking to see if the MSB is set in any element.
+                // If any iteration sets the MSB in any element of overflowTracking then we've overflowed.
+                if ((overflowTracking & overflowTestVector) != Vector<T>.Zero)
+                {
+                    throw new OverflowException();
+                }
+            }
+
+            // Add the elements in the vector horizontally.
             // Vector.Sum doesn't perform overflow checking, instead add elements individually.
             T result = T.Zero;
             for (int i = 0; i < Vector<T>.Count; i++)

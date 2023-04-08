@@ -3,13 +3,11 @@ using SimdLib;
 
 namespace Simd
 {
-    [DisassemblyDiagnoser]
-    [ShortRunJob]
     public class SimdInt
     {
         private int[] _array;
 
-        [Params(/*16,*/ 32, 128/*, 1024*/)]
+        [Params(/*16,*/ 32, 128, 1024)]
         public int Size { get; set; }
 
         [GlobalSetup]

@@ -26,7 +26,10 @@ namespace SimdTests
         [Theory]
         [InlineData(1)]
         [InlineData(8)]
+        [InlineData(128)]
         [InlineData(256)]
+        [InlineData(288)]
+        [InlineData(290)]
         [InlineData(1024)]
         public void VectorSum(int size)
         {
