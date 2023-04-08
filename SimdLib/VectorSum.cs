@@ -29,12 +29,12 @@ namespace SimdLib
             if (typeof(T) == typeof(TResult)
                 && Vector<T>.IsSupported
                 && Vector.IsHardwareAccelerated
+                && Vector<T>.Count > 2
                 && span.Length >= Vector<T>.Count * 4)
             {
-                // Note: While only two vectors of data are a requirement, the advantages are significantly
-                // reduced for short lists of larger integers. This is because fewer operations would be required
-                // to sum as a scalar, especially given the added costs of vectorized overflow checks. Therefore,
-                // vectorization is only performed if there are at least 32 elements regardless of vector size.
+                // For cases where the vector may only contain two elements vectorization doesn't add any benefit
+                // due to the expense of overflow checking. This means that architectures where Vector<T> is 128 bit,
+                // such as ARM or Intel without AVX, will only vectorize spans of ints and not longs.
 
                 if (typeof(T) == typeof(long))
                 {
@@ -66,9 +66,20 @@ namespace SimdLib
             ref T ptr = ref MemoryMarshal.GetReference(span);
             int length = span.Length;
 
+            // Overflow testing for vectors is based on setting the sign bit of the overflowTracking
+            // vector for an element if the following are all true:
+            //   - The two elements being summed have the same sign bit. If one element is positive
+            //     and the other is negative then an overflow is not possible.
+            //   - The sign bit of the sum is not the same as the sign bit of the previous accumulator.
+            //     This indicates that the new sum wrapped around to the opposite sign.
+            //
+            // By bitwise or-ing the overflowTracking vector for each step we can save cycles by testing
+            // the sign bits less often. If any iteration has the sign bit set in any element it indicates
+            // there was an overflow.
+
             Vector<T> accumulator = Vector<T>.Zero;
 
-            // Build a test vector with only the MSB set.
+            // Build a test vector with only the sign bit set in each element. JIT will fold this into a constant.
             Vector<T> overflowTestVector = new(T.RotateRight(T.MultiplicativeIdentity, 1));
 
             // Unroll the loop to sum 4 vectors per iteration
@@ -91,8 +102,6 @@ namespace SimdLib
                 accumulator = accumulator2 + data;
                 overflowTracking |= (accumulator ^ accumulator2) & (accumulator ^ data);
 
-                // Test the elements in overflowTracking to see if the MSB is set in any element.
-                // If any iteration sets the MSB in any element of overflowTracking then we've overflowed.
                 if ((overflowTracking & overflowTestVector) != Vector<T>.Zero)
                 {
                     throw new OverflowException();
@@ -115,8 +124,6 @@ namespace SimdLib
                     accumulator = accumulator2;
                 } while (length >= Vector<T>.Count);
 
-                // Test the elements in overflowTracking to see if the MSB is set in any element.
-                // If any iteration sets the MSB in any element of overflowTracking then we've overflowed.
                 if ((overflowTracking & overflowTestVector) != Vector<T>.Zero)
                 {
                     throw new OverflowException();
